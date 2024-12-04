@@ -2,6 +2,8 @@
 
 A Streamlit-based web application that converts Japanese text (romaji/hiragana/katakana) into MIDI files with customizable parameters. Perfect for UTAU/DIFFSINGER and other voice synthesis development workflows.
 
+https://text2midi.streamlit.app/ Live demo 
+
 ## Features
 
 - Convert text to MIDI with customizable parameters
