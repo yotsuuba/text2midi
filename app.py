@@ -4,10 +4,10 @@ import numpy as np
 from midiutil import MIDIFile
 import jaconv
 import pretty_midi
-import tempfile
 import os
 import base64
 import re
+from io import BytesIO
 
 class TextToMIDI:
     def __init__(self, bpm=120, time_signature=(4, 4), base_pitch=64, label_silence_duration=0.5):
@@ -166,13 +166,11 @@ def get_note_name(midi_number):
     octave = (midi_number // 12) - 1
     return f"{note}{octave}"
 
-def create_download_link(file_path, file_type):
-    """Create a download link for a file."""
-    with open(file_path, "rb") as file:
-        file_data = file.read()
-    encoded_file = base64.b64encode(file_data).decode()
-    download_link = f'<a href="data:file/{file_type};base64,{encoded_file}" download="{os.path.basename(file_path)}">Download {file_type.upper()}</a>'
-    return download_link
+@st.cache_data
+def create_download_link(file_data, file_name, file_type):
+    """Create a download link for file data."""
+    b64 = base64.b64encode(file_data).decode()
+    return f'<a href="data:file/{file_type};base64,{b64}" download="{file_name}">Download {file_type.upper()}</a>'
 
 st.set_page_config(page_title="Text to MIDI Generator", layout="wide")
 
@@ -223,25 +221,25 @@ if st.button("Generate MIDI"):
         try:
             midi_data, labels, total_duration = midi_generator.create_midi(text_input)
             
-            # Save files
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.mid') as tmp_midi:
-                midi_data.writeFile(tmp_midi)
+            # Create MIDI file in memory
+            midi_buffer = BytesIO()
+            midi_data.writeFile(midi_buffer)
+            midi_bytes = midi_buffer.getvalue()
             
+            # Create label file content if needed
             if create_labels:
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.txt') as tmp_label:
-                    label_content = '\n'.join([
-                        f"{label['start']:.3f}\t{label['end']:.3f}\t{label['text']}" 
-                        for label in labels
-                    ])
-                    tmp_label.write(label_content.encode('utf-8'))
+                label_content = '\n'.join([
+                    f"{label['start']:.3f}\t{label['end']:.3f}\t{label['text']}" 
+                    for label in labels
+                ]).encode('utf-8')
             
             # Display download links
             col1, col2 = st.columns(2)
             with col1:
-                st.markdown(create_download_link(tmp_midi.name, "midi"), unsafe_allow_html=True)
+                st.markdown(create_download_link(midi_bytes, "output.mid", "midi"), unsafe_allow_html=True)
             if create_labels:
                 with col2:
-                    st.markdown(create_download_link(tmp_label.name, "label"), unsafe_allow_html=True)
+                    st.markdown(create_download_link(label_content, "labels.txt", "text"), unsafe_allow_html=True)
             
             # Display information
             st.info(f"Total duration: {total_duration:.2f} seconds")
@@ -250,11 +248,6 @@ if st.button("Generate MIDI"):
                 st.subheader("Label Preview")
                 df = pd.DataFrame(labels)
                 st.dataframe(df)
-            
-            # Cleanup
-            os.unlink(tmp_midi.name)
-            if create_labels:
-                os.unlink(tmp_label.name)
                 
         except Exception as e:
             st.error(f"An error occurred: {str(e)}")
@@ -266,4 +259,3 @@ if st.button("Generate MIDI"):
     ---
     *Made by H5X2 with love, 2024-2025*.
     """)
-
