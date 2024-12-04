@@ -4,6 +4,5 @@ numpy>=1.26.0
 midiutil>=1.2.1
 jaconv>=0.3.4
 pretty-midi>=0.2.10
-tempfile>=3.8.0
 base64>=3.8.0
 re>=3.8.0
