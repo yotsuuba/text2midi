@@ -1,6 +1,7 @@
 streamlit>=1.31.0
-pandas>=2.2.0
-numpy>=1.26.0
+setuptools>=68.0.0
+pandas>=2.0.0
+numpy>=1.24.0
 midiutil>=1.2.1
 jaconv>=0.3.4
-pretty-midi>=0.2.10
+pretty_midi>=0.2.10
