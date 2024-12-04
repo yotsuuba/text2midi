@@ -41,9 +41,9 @@ class TextToMIDI:
         i = 0
         
         while i < len(text):
+            # Explicitly handle underscore based on rest mode
             if text[i] == '_':
-                if self.treat_underscore_as_rest:
-                    processed.append('_')
+                processed.append('_')
                 i += 1
                 continue
             
@@ -86,9 +86,9 @@ class TextToMIDI:
         i = 0
         
         while i < len(chars):
+            # Explicitly handle underscore based on rest mode
             if chars[i] == '_':
-                if self.treat_underscore_as_rest:
-                    processed.append('_')
+                processed.append('_')
                 i += 1
                 continue
             
@@ -122,32 +122,6 @@ class TextToMIDI:
                 
         return processed
 
-    def calculate_max_label_silence(self, text):
-        if not text or not text.strip():
-            return 0.5  # Default value
-        
-        lines = text.strip().split('\n')
-        min_gap = float('inf')
-        current_time = self.silence_duration
-        
-        for line in lines:
-            if not line.strip():
-                continue
-                
-            is_cluster = len(line.strip().split()) == 1 and len(line.strip()) > 1
-            if is_cluster:
-                chars = self.process_text(line.strip())
-                cluster_duration = len(chars) * self.note_duration
-                min_gap = min(min_gap, self.silence_duration)
-                current_time += cluster_duration + self.silence_duration
-            else:
-                words = line.strip().split()
-                for word in words:
-                    min_gap = min(min_gap, self.silence_duration)
-                    current_time += self.note_duration + self.silence_duration
-        
-        return min(min_gap / 2, 1.0)  # Cap at 1 second
-
     def create_midi(self, text):
         midi = MIDIFile(1)
         track = 0
@@ -172,8 +146,10 @@ class TextToMIDI:
                 cluster_start = current_time
                 
                 for char in chars:
-                    if char == '_' and self.treat_underscore_as_rest:
-                        current_time += self.note_duration
+                    if char == '_':
+                        # If underscore is a rest, just advance time
+                        if self.treat_underscore_as_rest:
+                            current_time += self.note_duration
                         continue
                     
                     beat_time = (current_time * self.bpm) / 60
@@ -202,8 +178,10 @@ class TextToMIDI:
                     note_start = current_time
                     
                     for char in self.process_text(word):
-                        if char == '_' and self.treat_underscore_as_rest:
-                            current_time += self.note_duration
+                        if char == '_':
+                            # If underscore is a rest, just advance time
+                            if self.treat_underscore_as_rest:
+                                current_time += self.note_duration
                             continue
                         
                         beat_time = (current_time * self.bpm) / 60
