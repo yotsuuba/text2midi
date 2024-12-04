@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from midiutil import MIDIFile
-import jaconv
 import pretty_midi
 import os
 import base64
@@ -23,6 +22,14 @@ class TextToMIDI:
             'small_kana': set('ぁぃぅぇぉゃゅょゎァィゥェォャュョヮ'),
             'sokuon': set('っッ'),
             'small_katakana': set('ァィゥェォヵヶㇰㇱㇲㇳㇴㇵㇶㇷㇸㇹㇺㇻㇼㇽㇾㇿ')
+        }
+        
+        # Romaji combinations that should be treated as single sounds
+        self.romaji_combinations = {
+            'ch', 'sh', 'ts', 'th',  # Basic combinations
+            'ky', 'gy', 'ny', 'hy', 'ry', 'ty',  # y-combinations
+            'kw', 'gw',  # w-combinations
+            'dz', 'ts',  # Other combinations
         }
 
     def calculate_max_label_silence(self, text):
@@ -47,9 +54,47 @@ class TextToMIDI:
                     min_gap = min(min_gap, self.silence_duration)
                     current_time += self.note_duration + self.silence_duration
         
-        return min_gap / 2  # Maximum silence that won't cause overlap
+        return min_gap / 2
+
+    def is_romaji(self, text):
+        """Check if text is likely romaji"""
+        return bool(re.match(r'^[a-zA-Z]+$', text))
+
+    def process_romaji(self, text):
+        """Process romaji text into phonetic units"""
+        text = text.lower()
+        processed = []
+        i = 0
+        
+        while i < len(text):
+            # Check for three-letter combinations
+            if i + 2 < len(text):
+                three_chars = text[i:i+3]
+                if three_chars.startswith(tuple(self.romaji_combinations)):
+                    processed.append(three_chars)
+                    i += 3
+                    continue
+            
+            # Check for two-letter combinations
+            if i + 1 < len(text):
+                two_chars = text[i:i+2]
+                if two_chars in self.romaji_combinations:
+                    processed.append(two_chars)
+                    i += 2
+                    continue
+            
+            # Single character
+            processed.append(text[i])
+            i += 1
+        
+        return processed
 
     def process_text(self, text):
+        """Process text handling both romaji and kana"""
+        if self.is_romaji(text):
+            return self.process_romaji(text)
+        
+        # Original kana processing
         chars = list(text)
         processed = []
         i = 0
@@ -117,7 +162,6 @@ class TextToMIDI:
                 label_start = max(0, cluster_start - self.label_silence_duration)
                 label_end = current_time + self.label_silence_duration
                 
-                # Ensure no overlap with previous label
                 if labels:
                     label_start = max(label_start, labels[-1]['end'])
                 
@@ -142,7 +186,6 @@ class TextToMIDI:
                     label_start = max(0, note_start - self.label_silence_duration)
                     label_end = current_time + self.note_duration + self.label_silence_duration
                     
-                    # Ensure no overlap with previous label
                     if labels:
                         label_start = max(label_start, labels[-1]['end'])
                     
@@ -155,7 +198,6 @@ class TextToMIDI:
                     last_note_end = current_time + self.note_duration
                     current_time += self.note_duration + self.silence_duration
 
-        # Add final silence
         current_time += self.final_silence
         
         return midi, labels, last_note_end + self.final_silence
@@ -176,7 +218,7 @@ st.set_page_config(page_title="Text to MIDI Generator", layout="wide")
 
 st.title("Text to MIDI Generator")
 st.markdown("""
-This application generates MIDI files from text input (romaji/hiragana/katakana) with customizable parameters.
+This application generates MIDI files from text input (romaji/hiragana/katakana/english) with customizable parameters.
 Intended to be used for Vsynth Development [UTAU/DIFFSINGER/ETC].
 """)
 
@@ -191,10 +233,9 @@ with st.sidebar:
     create_labels = st.checkbox("Generate Label File", value=True)
 
 text_input = st.text_area("Enter your text:", height=200,
-                         help="Enter text in hiragana, katakana, or romaji. Use empty lines to separate clusters.")
+                         help="Enter text in hiragana, katakana, romaji, or english. Use empty lines to separate clusters.")
 
 if text_input:
-    # Calculate maximum allowed silence duration
     temp_midi = TextToMIDI(bpm=bpm, time_signature=(time_sig_num, time_sig_den))
     max_silence = temp_midi.calculate_max_label_silence(text_input)
     
@@ -221,19 +262,16 @@ if st.button("Generate MIDI"):
         try:
             midi_data, labels, total_duration = midi_generator.create_midi(text_input)
             
-            # Create MIDI file in memory
             midi_buffer = BytesIO()
             midi_data.writeFile(midi_buffer)
             midi_bytes = midi_buffer.getvalue()
             
-            # Create label file content if needed
             if create_labels:
                 label_content = '\n'.join([
                     f"{label['start']:.3f}\t{label['end']:.3f}\t{label['text']}" 
                     for label in labels
                 ]).encode('utf-8')
             
-            # Display download links
             col1, col2 = st.columns(2)
             with col1:
                 st.markdown(create_download_link(midi_bytes, "output.mid", "midi"), unsafe_allow_html=True)
@@ -241,7 +279,6 @@ if st.button("Generate MIDI"):
                 with col2:
                     st.markdown(create_download_link(label_content, "labels.txt", "text"), unsafe_allow_html=True)
             
-            # Display information
             st.info(f"Total duration: {total_duration:.2f} seconds")
             
             if create_labels:
@@ -254,7 +291,6 @@ if st.button("Generate MIDI"):
     else:
         st.warning("Please enter some text first.")
     
-    # Credits
     st.markdown("""
     ---
     *Made by H5X2 with love, 2024-2025*.
