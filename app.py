@@ -13,11 +13,11 @@ class TextToMIDI:
         self.time_signature = time_signature
         self.base_pitch = base_pitch
         self.note_duration = 2
-        self.silence_duration = 2
+        self.silence_duration = 2  # Regular silence between words/clusters
+        self.short_silence_duration = 0.5  # Short silence for rest mode in clusters
         self.label_silence_duration = label_silence_duration
         self.final_silence = 2
         self.treat_underscore_as_rest = treat_underscore_as_rest
-        self.rest_duration = 1  # Shorter duration for rests within clusters
         
         self.special_chars = {
             'small_kana': set('ぁぃぅぇぉゃゅょゎァィゥェォャュョヮ'),
@@ -36,9 +36,14 @@ class TextToMIDI:
     def is_romaji(self, text):
         return bool(re.match(r'^[a-zA-Z_]+$', text))
 
-    def is_cluster_with_rests(self, text):
-        # Check if text is a cluster with underscore pattern (e.g., あ_い_う)
-        return '_' in text and not re.search(r'[_]{2,}', text) and not text.startswith('_') and not text.endswith('_')
+    def is_cluster(self, text):
+        # Check if text is a single "word" with multiple characters
+        return len(text.strip().split()) == 1 and len(text.strip()) > 1
+
+    def is_underscore_cluster(self, text):
+        # Check if text contains underscores in a pattern like "a_b_c"
+        parts = text.split('_')
+        return len(parts) > 1 and all(len(p) > 0 for p in parts)
 
     def process_romaji(self, text):
         text = text.lower()
@@ -46,6 +51,7 @@ class TextToMIDI:
         i = 0
         
         while i < len(text):
+            # Always keep underscores in the processed output
             if text[i] == '_':
                 processed.append('_')
                 i += 1
@@ -90,6 +96,7 @@ class TextToMIDI:
         i = 0
         
         while i < len(chars):
+            # Always keep underscores in the processed output
             if chars[i] == '_':
                 processed.append('_')
                 i += 1
@@ -116,7 +123,7 @@ class TextToMIDI:
                     i += 2
                 else:
                     i += 1
-                    
+                
                 processed.append(combined_char)
                 continue
             
@@ -136,37 +143,35 @@ class TextToMIDI:
         lines = text.strip().split('\n')
         current_time = self.silence_duration
         labels = []
-        last_note_end = 0
         
         for line in lines:
             if not line.strip():
                 continue
             
-            is_cluster = len(line.strip().split()) == 1 and len(line.strip()) > 1
-            
-            if is_cluster:
+            if self.is_cluster(line.strip()):
                 chars = self.process_text(line.strip())
                 cluster_start = current_time
-                
-                # Check if this is a cluster with rest pattern
-                is_rest_cluster = self.treat_underscore_as_rest and self.is_cluster_with_rests(line.strip())
+                is_underscore_cluster = self.is_underscore_cluster(line.strip())
                 
                 for i, char in enumerate(chars):
                     if char == '_':
-                        if is_rest_cluster:
-                            # Add a shorter rest duration for clusters with rest pattern
-                            current_time += self.rest_duration
+                        if self.treat_underscore_as_rest and is_underscore_cluster:
+                            # Add short silence between notes in rest mode
+                            current_time += self.short_silence_duration
                         continue
                     
+                    # Add note
                     beat_time = (current_time * self.bpm) / 60
                     midi.addNote(track, 0, self.base_pitch, beat_time, 
                                (self.note_duration * self.bpm) / 60, 100)
                     current_time += self.note_duration
                     
-                    # Add rest after note if in rest cluster (except for last note)
-                    if is_rest_cluster and i < len(chars) - 1 and chars[i + 1] == '_':
-                        current_time += self.rest_duration
+                    # Add short silence after note if in rest mode and not last note
+                    if (self.treat_underscore_as_rest and is_underscore_cluster and 
+                        i < len(chars) - 1 and chars[i + 1] == '_'):
+                        current_time += self.short_silence_duration
                 
+                # Add label for the entire cluster
                 label_start = max(0, cluster_start - self.label_silence_duration)
                 label_end = current_time + self.label_silence_duration
                 
@@ -179,12 +184,11 @@ class TextToMIDI:
                     'text': line.strip()
                 })
                 
-                last_note_end = current_time
                 current_time += self.silence_duration
             else:
+                # Handle non-cluster text (regular words)
                 words = line.strip().split()
                 for word in words:
-                    processed_word = ''.join(self.process_text(word))
                     note_start = current_time
                     
                     for char in self.process_text(word):
@@ -207,15 +211,13 @@ class TextToMIDI:
                     labels.append({
                         'start': label_start,
                         'end': label_end,
-                        'text': processed_word
+                        'text': word
                     })
                     
-                    last_note_end = current_time
                     current_time += self.silence_duration
 
-        current_time += self.final_silence
-        
-        return midi, labels, last_note_end + self.final_silence
+        total_duration = current_time + self.final_silence
+        return midi, labels, total_duration
 
 def get_note_name(midi_number):
     notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
@@ -236,10 +238,10 @@ def main():
     This application generates MIDI files from text input (romaji/hiragana/katakana/english) with customizable parameters.
     Intended to be used for Vsynth Development [UTAU/DIFFSINGER/ETC].
 
-    **Underscore Handling**: 
-    - When checked, '_' creates a rest between notes
-    - When unchecked, '_' is ignored and notes are connected
-    - In clusters (e.g., あ_い_う), rests are shorter for better rhythm
+    **Underscore Handling in Clusters**: 
+    - Normal clusters (e.g., うういおあおい): Notes played continuously
+    - With rest mode ON (e.g., う_う_い_お_あ_お_い): Short rests between notes
+    - With rest mode OFF: Underscores ignored, notes played continuously
     """)
 
     with st.sidebar:
@@ -254,13 +256,13 @@ def main():
         treat_underscore_as_rest = st.checkbox(
             "Treat '_' as Rest", 
             value=False, 
-            help="When checked, '_' creates a rest between notes. When unchecked, '_' is ignored."
+            help="When checked, '_' creates short rests between notes in clusters"
         )
         
         create_labels = st.checkbox("Generate Label File", value=True)
 
     text_input = st.text_area("Enter your text:", height=200,
-                             help="Enter text in hiragana, katakana, romaji, or english. Use '_' for optional rests. Use empty lines to separate clusters.")
+                             help="Enter text in hiragana, katakana, romaji, or english. For clusters with rests, use format: う_う_い_お_あ_お_い")
 
     if st.button("Generate MIDI"):
         if text_input:
@@ -269,7 +271,7 @@ def main():
                     bpm=bpm, 
                     time_signature=(time_sig_num, time_sig_den),
                     base_pitch=base_pitch,
-                    label_silence_duration=0.5,  # Default value
+                    label_silence_duration=0.5,
                     treat_underscore_as_rest=treat_underscore_as_rest
                 )
                 
